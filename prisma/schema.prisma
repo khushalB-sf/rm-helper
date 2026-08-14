@@ -1,0 +1,229 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id       String @id @default(cuid())
+  username String @unique
+  email    String @unique
+  password String
+
+  emailVerified Boolean @default(false)
+
+  verificationToken       String?   @unique
+  verificationTokenExpiry DateTime?
+
+  resetToken       String?   @unique
+  resetTokenExpiry DateTime?
+
+  refreshTokenHash   String?   @unique
+  refreshTokenExpiry DateTime?
+
+  phone             String?
+  yearsOfExperience Int?
+  organizations     String[] @default([])
+  projects          Json?
+
+  role      Role    @default(TEAM_MEMBER)
+  managerId String?
+  manager   User?   @relation("ManagerToReports", fields: [managerId], references: [id])
+  reports   User[]  @relation("ManagerToReports")
+
+  tests                  Test[]
+  skillEntries           UserSkill[]
+  projectAssignments     ProjectAssignment[]
+  goalsOwned             Goal[]                            @relation("GoalOwner")
+  goalsAssigned          Goal[]                            @relation("GoalAssignedBy")
+  certifications         Certification[]
+  certificationsAssigned Certification[]                   @relation("CertificationAssignedBy")
+  sessionsCreated        InternalSession[]                 @relation("InternalSessionCreatedBy")
+  sessionsPresented      InternalSession[]                 @relation("InternalSessionPresenter")
+  orgSessionsAttended    OrganisationalSessionAttendance[]
+
+  createdAt DateTime @default(now())
+}
+
+enum ExpertiseLevel {
+  NEW
+  INTERMEDIATE
+  EXPERT
+}
+
+enum Role {
+  RM
+  TEAM_MEMBER
+}
+
+enum GoalType {
+  DEPARTMENTAL
+  BENCH
+}
+
+enum GoalStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum CertStatus {
+  APPLIED
+  PASSED
+  FAILED
+}
+
+model UserSkill {
+  id             String         @id @default(cuid())
+  userId         String
+  user           User           @relation(fields: [userId], references: [id])
+  skill          String
+  expertiseLevel ExpertiseLevel
+  updatedAt      DateTime       @updatedAt
+
+  @@unique([userId, skill])
+}
+
+model Project {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  client    String?
+  pmCsm     String?
+  startDate DateTime?
+  endDate   DateTime?
+
+  assignments ProjectAssignment[]
+}
+
+model ProjectAssignment {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  projectId   String
+  project     Project   @relation(fields: [projectId], references: [id])
+  hoursPerDay Float
+  status      String
+  blocker     String?
+  startDate   DateTime  @default(now())
+  endDate     DateTime?
+
+  @@index([userId])
+}
+
+model Goal {
+  id           String     @id @default(cuid())
+  ownerId      String
+  owner        User       @relation("GoalOwner", fields: [ownerId], references: [id])
+  assignedById String?
+  assignedBy   User?      @relation("GoalAssignedBy", fields: [assignedById], references: [id])
+  type         GoalType
+  title        String
+  description  String?
+  progressPct  Int        @default(0)
+  status       GoalStatus @default(NOT_STARTED)
+  dueDate      DateTime?
+  createdAt    DateTime   @default(now())
+
+  updates GoalUpdate[]
+  tests   Test[]
+}
+
+model GoalUpdate {
+  id          String   @id @default(cuid())
+  goalId      String
+  goal        Goal     @relation(fields: [goalId], references: [id])
+  progressPct Int
+  note        String?
+  createdAt   DateTime @default(now())
+
+  @@index([goalId])
+}
+
+model Certification {
+  id           String     @id @default(cuid())
+  userId       String
+  user         User       @relation(fields: [userId], references: [id])
+  assignedById String?
+  assignedBy   User?      @relation("CertificationAssignedBy", fields: [assignedById], references: [id])
+  name         String
+  status       CertStatus @default(APPLIED)
+  score        Int?
+  maxScore     Int?
+  appliedDate  DateTime?
+  resultDate   DateTime?
+  createdAt    DateTime   @default(now())
+
+  @@index([userId])
+}
+
+model InternalSession {
+  id            String    @id @default(cuid())
+  title         String
+  description   String?
+  createdById   String
+  createdBy     User      @relation("InternalSessionCreatedBy", fields: [createdById], references: [id])
+  presenterId   String?
+  presenter     User?     @relation("InternalSessionPresenter", fields: [presenterId], references: [id])
+  conductedDate   DateTime?
+  recordingUrl    String?
+  presentationUrl String?
+  githubUrl       String?
+  referenceUrl    String?
+  createdAt       DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model OrganisationalSessionAttendance {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  title        String
+  attendedDate DateTime
+  notes        String?
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Test {
+  id                String         @id @default(cuid())
+  userId            String
+  user              User           @relation(fields: [userId], references: [id])
+  skill             String
+  yearsOfExperience Int
+  expertiseLevel    ExpertiseLevel
+  questionCount     Int
+  score             Int?
+  createdAt         DateTime       @default(now())
+  completedAt       DateTime?
+
+  goalId String?
+  goal   Goal?   @relation(fields: [goalId], references: [id])
+
+  questions Question[]
+
+  @@index([userId])
+  @@index([goalId])
+}
+
+model Question {
+  id            String   @id @default(cuid())
+  testId        String
+  test          Test     @relation(fields: [testId], references: [id])
+  question      String
+  options       Json
+  correctAnswer String
+  explanation   String
+  userAnswer    String?
+  isCorrect     Boolean?
+
+  @@index([testId])
+}

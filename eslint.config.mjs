@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored shadcn/ui code — regenerate via `npx shadcn@latest add`, don't hand-edit or lint.
+    "components/ui/**",
+    "hooks/**",
   ]),
 ]);
 
