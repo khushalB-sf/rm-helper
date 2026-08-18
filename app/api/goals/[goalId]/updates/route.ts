@@ -42,9 +42,18 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ message: "Progress must be a number between 0 and 100." }, { status: 400 });
   }
 
+  const status = statusForProgress(progressPct);
+  let completionDate: Date | undefined;
+  if (status === "COMPLETED") {
+    completionDate = body.completionDate ? new Date(body.completionDate) : new Date();
+    if (Number.isNaN(completionDate.getTime())) {
+      return NextResponse.json({ message: "Invalid completion date." }, { status: 400 });
+    }
+  }
+
   const [update] = await prisma.$transaction([
     prisma.goalUpdate.create({ data: { goalId, progressPct, note }, select: { id: true, progressPct: true, note: true, createdAt: true } }),
-    prisma.goal.update({ where: { id: goalId }, data: { progressPct, status: statusForProgress(progressPct) } }),
+    prisma.goal.update({ where: { id: goalId }, data: { progressPct, status, ...(completionDate && { completionDate }) } }),
   ]);
 
   return NextResponse.json({ update });

@@ -23,9 +23,15 @@ export interface TeamCertification {
   user: { id: string; username: string };
 }
 
+export interface CertificationCatalogEntry {
+  id: string;
+  name: string;
+}
+
 interface TeamCertificationsManagerProps {
   reports: Report[];
   initialCertifications: TeamCertification[];
+  initialCatalog: CertificationCatalogEntry[];
 }
 
 const CERT_TONE: Record<TeamCertification["status"], string> = {
@@ -40,11 +46,29 @@ const CERT_STATUS_LABEL: Record<TeamCertification["status"], string> = {
   FAILED: "Failed",
 };
 
-const TeamCertificationsManager = ({ reports, initialCertifications }: TeamCertificationsManagerProps) => {
+const TeamCertificationsManager = ({ reports, initialCertifications, initialCatalog }: TeamCertificationsManagerProps) => {
   const [certifications, setCertifications] = useState(initialCertifications);
+  const [catalog, setCatalog] = useState(initialCatalog);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const [notice, setNotice] = useState<string | undefined>();
+
+  const [certValue, setCertValue] = useState(initialCatalog[0]?.name ?? "");
+  const [addingCert, setAddingCert] = useState(false);
+  const [newCertName, setNewCertName] = useState("");
+  const [catalogSaving, setCatalogSaving] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | undefined>();
+
+  function closeAssignDialog(next: boolean) {
+    setOpen(next);
+    if (!next) {
+      setAddingCert(false);
+      setNewCertName("");
+      setCatalogError(undefined);
+      setError(undefined);
+    }
+  }
 
   const passed = certifications.filter((c) => c.status === "PASSED").length;
   const failed = certifications.filter((c) => c.status === "FAILED").length;
@@ -66,8 +90,33 @@ const TeamCertificationsManager = ({ reports, initialCertifications }: TeamCerti
       setError(data.message ?? "Something went wrong.");
       return;
     }
-    setCertifications((prev) => [data.certification, ...prev]);
+    setCertifications((prev) => [...(data.certifications ?? [data.certification]), ...prev]);
+    setNotice(data.skipped ? `Skipped ${data.skipped} team member(s) who already have this certification.` : undefined);
     setOpen(false);
+  }
+
+  async function commitNewCertification() {
+    const name = newCertName.trim();
+    if (!name) return;
+    setCatalogSaving(true);
+    setCatalogError(undefined);
+    const res = await fetch("/api/team/certifications/catalog", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const data = await res.json();
+    setCatalogSaving(false);
+    if (!res.ok) {
+      setCatalogError(data.message ?? "Something went wrong.");
+      return;
+    }
+    setCatalog((prev) =>
+      prev.some((entry) => entry.id === data.catalogEntry.id) ? prev : [...prev, data.catalogEntry].sort((a, b) => a.name.localeCompare(b.name))
+    );
+    setCertValue(data.catalogEntry.name);
+    setNewCertName("");
+    setAddingCert(false);
   }
 
   return (
@@ -79,9 +128,11 @@ const TeamCertificationsManager = ({ reports, initialCertifications }: TeamCerti
         <StatTile label="Pending" value={String(pending)} />
       </div>
 
+      {notice && <p className="text-sm text-muted-foreground">{notice}</p>}
+
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Certifications</h2>
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog open={open} onOpenChange={closeAssignDialog}>
           <DialogTrigger asChild>
             <Button size="sm" disabled={reports.length === 0}>
               New certification
@@ -92,11 +143,69 @@ const TeamCertificationsManager = ({ reports, initialCertifications }: TeamCerti
               <DialogTitle>Assign a certification</DialogTitle>
             </DialogHeader>
             <form onSubmit={assignCertification} className="flex flex-col gap-2">
+              {addingCert ? (
+                <div className="flex items-center gap-2">
+                  <Input
+                    autoFocus
+                    placeholder="New certification name"
+                    value={newCertName}
+                    onChange={(e) => setNewCertName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        commitNewCertification();
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={commitNewCertification}
+                    disabled={catalogSaving || !newCertName.trim()}
+                  >
+                    {catalogSaving ? "Adding..." : "Add"}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setAddingCert(false);
+                      setNewCertName("");
+                      setCatalogError(undefined);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              ) : (
+                <Select
+                  name="name"
+                  required
+                  value={certValue}
+                  onValueChange={(value) => (value === "__ADD_NEW__" ? setAddingCert(true) : setCertValue(value))}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Certification" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__ADD_NEW__">+ Add new certification</SelectItem>
+                    {catalog.map((entry) => (
+                      <SelectItem key={entry.id} value={entry.name}>
+                        {entry.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              {catalogError && <p className="text-sm text-destructive">{catalogError}</p>}
+
               <Select name="userId" required defaultValue={reports[0]?.id}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Team member" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="ALL">Assign to all</SelectItem>
                   {reports.map((report) => (
                     <SelectItem key={report.id} value={report.id}>
                       {report.username}
@@ -104,9 +213,9 @@ const TeamCertificationsManager = ({ reports, initialCertifications }: TeamCerti
                   ))}
                 </SelectContent>
               </Select>
-              <Input name="name" required placeholder="e.g. CCAF" />
+
               {error && <p className="text-sm text-destructive">{error}</p>}
-              <Button type="submit" size="sm" disabled={saving} className="self-start">
+              <Button type="submit" size="sm" disabled={saving || addingCert || !certValue} className="self-start">
                 {saving ? "Assigning..." : "Assign"}
               </Button>
             </form>

@@ -39,16 +39,18 @@ model User {
   manager   User?   @relation("ManagerToReports", fields: [managerId], references: [id])
   reports   User[]  @relation("ManagerToReports")
 
-  tests                  Test[]
-  skillEntries           UserSkill[]
-  projectAssignments     ProjectAssignment[]
-  goalsOwned             Goal[]                            @relation("GoalOwner")
-  goalsAssigned          Goal[]                            @relation("GoalAssignedBy")
-  certifications         Certification[]
-  certificationsAssigned Certification[]                   @relation("CertificationAssignedBy")
-  sessionsCreated        InternalSession[]                 @relation("InternalSessionCreatedBy")
-  sessionsPresented      InternalSession[]                 @relation("InternalSessionPresenter")
-  orgSessionsAttended    OrganisationalSessionAttendance[]
+  tests                       Test[]
+  skillEntries                UserSkill[]
+  projectAssignments          ProjectAssignment[]
+  goalsOwned                  Goal[]                            @relation("GoalOwner")
+  goalsAssigned               Goal[]                            @relation("GoalAssignedBy")
+  certifications              Certification[]
+  certificationsAssigned      Certification[]                   @relation("CertificationAssignedBy")
+  certificationCatalogCreated CertificationCatalog[]
+  goalCatalogCreated          GoalCatalog[]
+  sessionsCreated             InternalSession[]                 @relation("InternalSessionCreatedBy")
+  sessionsPresented           InternalSession[]                 @relation("InternalSessionPresenter")
+  orgSessionsAttended         OrganisationalSessionAttendance[]
 
   createdAt DateTime @default(now())
 }
@@ -119,18 +121,19 @@ model ProjectAssignment {
 }
 
 model Goal {
-  id           String     @id @default(cuid())
-  ownerId      String
-  owner        User       @relation("GoalOwner", fields: [ownerId], references: [id])
-  assignedById String?
-  assignedBy   User?      @relation("GoalAssignedBy", fields: [assignedById], references: [id])
-  type         GoalType
-  title        String
-  description  String?
-  progressPct  Int        @default(0)
-  status       GoalStatus @default(NOT_STARTED)
-  dueDate      DateTime?
-  createdAt    DateTime   @default(now())
+  id                 String     @id @default(cuid())
+  ownerId            String
+  owner              User       @relation("GoalOwner", fields: [ownerId], references: [id])
+  assignedById       String?
+  assignedBy         User?      @relation("GoalAssignedBy", fields: [assignedById], references: [id])
+  type               GoalType
+  title              String
+  description        String?
+  progressPct        Int        @default(0)
+  status             GoalStatus @default(NOT_STARTED)
+  lastCompletionDate DateTime?
+  completionDate     DateTime?
+  createdAt          DateTime   @default(now())
 
   updates GoalUpdate[]
   tests   Test[]
@@ -145,6 +148,17 @@ model GoalUpdate {
   createdAt   DateTime @default(now())
 
   @@index([goalId])
+}
+
+model GoalCatalog {
+  id          String   @id @default(cuid())
+  title       String
+  type        GoalType
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@unique([title, type])
 }
 
 model Certification {
@@ -164,21 +178,29 @@ model Certification {
   @@index([userId])
 }
 
+model CertificationCatalog {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+}
+
 model InternalSession {
-  id            String    @id @default(cuid())
-  title         String
-  description   String?
-  createdById   String
-  createdBy     User      @relation("InternalSessionCreatedBy", fields: [createdById], references: [id])
-  presenterId   String?
-  presenter     User?     @relation("InternalSessionPresenter", fields: [presenterId], references: [id])
+  id              String    @id @default(cuid())
+  title           String
+  description     String?
+  createdById     String
+  createdBy       User      @relation("InternalSessionCreatedBy", fields: [createdById], references: [id])
+  presenterId     String?
+  presenter       User?     @relation("InternalSessionPresenter", fields: [presenterId], references: [id])
   conductedDate   DateTime?
   recordingUrl    String?
   presentationUrl String?
   githubUrl       String?
   referenceUrl    String?
   createdAt       DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  updatedAt       DateTime  @updatedAt
 }
 
 model OrganisationalSessionAttendance {

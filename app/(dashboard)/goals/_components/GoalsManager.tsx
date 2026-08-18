@@ -17,7 +17,9 @@ export interface Goal {
   description: string | null;
   progressPct: number;
   status: "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED";
-  dueDate: string | null;
+  lastCompletionDate: string | null;
+  completionDate: string | null;
+  createdAt: string;
   assignedBy: { username: string } | null;
   tests: { id: string; score: number | null; questionCount: number; completedAt: string | null }[];
 }
@@ -29,25 +31,26 @@ interface GoalsManagerProps {
 
 function meterTone(goal: Goal): "good" | "warning" | "critical" | "neutral" {
   if (goal.status === "COMPLETED") return "good";
-  if (goal.dueDate && new Date(goal.dueDate) < new Date()) return "critical";
+  if (goal.lastCompletionDate && new Date(goal.lastCompletionDate) < new Date()) return "critical";
   return "neutral";
 }
 
 const GoalsManager = ({ initialGoals, isUnassigned }: GoalsManagerProps) => {
   const [goals, setGoals] = useState(initialGoals);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [progressDraft, setProgressDraft] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | undefined>();
 
   const hasOpenBenchGoal = goals.some((g) => g.type === "BENCH" && g.status !== "COMPLETED");
 
-  async function postUpdate(goalId: string, progressPct: number, note: string) {
+  async function postUpdate(goalId: string, progressPct: number, note: string, completionDate?: string) {
     setSaving(true);
     setError(undefined);
     const res = await fetch(`/api/goals/${goalId}/updates`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ progressPct, note }),
+      body: JSON.stringify({ progressPct, note, completionDate }),
     });
     const data = await res.json();
     setSaving(false);
@@ -56,7 +59,11 @@ const GoalsManager = ({ initialGoals, isUnassigned }: GoalsManagerProps) => {
       return;
     }
     const status = progressPct >= 100 ? "COMPLETED" : progressPct > 0 ? "IN_PROGRESS" : "NOT_STARTED";
-    setGoals((prev) => prev.map((g) => (g.id === goalId ? { ...g, progressPct, status } : g)));
+    setGoals((prev) =>
+      prev.map((g) =>
+        g.id === goalId ? { ...g, progressPct, status, completionDate: status === "COMPLETED" ? completionDate ?? g.completionDate : g.completionDate } : g
+      )
+    );
     setUpdatingId(null);
   }
 
@@ -94,8 +101,16 @@ const GoalsManager = ({ initialGoals, isUnassigned }: GoalsManagerProps) => {
                 <CardContent className="flex flex-col gap-3">
                   {goal.description && <p className="text-sm text-muted-foreground">{goal.description}</p>}
                   <Meter value={goal.progressPct} label={goal.status.replace("_", " ")} tone={meterTone(goal)} />
-                  {goal.dueDate && (
-                    <p className="text-xs text-muted-foreground">ETA: {new Date(goal.dueDate).toLocaleDateString()}</p>
+                  <p className="text-xs text-muted-foreground">Created on: {new Date(goal.createdAt).toLocaleDateString()}</p>
+                  {goal.lastCompletionDate && (
+                    <p className="text-xs text-muted-foreground">
+                      Last date of completion: {new Date(goal.lastCompletionDate).toLocaleDateString()}
+                    </p>
+                  )}
+                  {goal.completionDate && (
+                    <p className="text-xs text-muted-foreground">
+                      Date of completion: {new Date(goal.completionDate).toLocaleDateString()}
+                    </p>
                   )}
                   {latestTest && (
                     <Badge variant={latestTest.completedAt ? "secondary" : "outline"}>
@@ -109,12 +124,35 @@ const GoalsManager = ({ initialGoals, isUnassigned }: GoalsManagerProps) => {
                         onSubmit={(event) => {
                           event.preventDefault();
                           const formData = new FormData(event.currentTarget);
-                          postUpdate(goal.id, Number(formData.get("progressPct")), String(formData.get("note") ?? ""));
+                          postUpdate(
+                            goal.id,
+                            progressDraft,
+                            String(formData.get("note") ?? ""),
+                            progressDraft >= 100 ? String(formData.get("completionDate") ?? "") : undefined
+                          );
                         }}
                         className="flex flex-col gap-2 border-t pt-3"
                       >
-                        <Input name="progressPct" type="number" min={0} max={100} required defaultValue={goal.progressPct} placeholder="Progress %" />
+                        <Input
+                          name="progressPct"
+                          type="number"
+                          min={0}
+                          max={100}
+                          required
+                          value={progressDraft}
+                          onChange={(e) => setProgressDraft(Number(e.target.value))}
+                          placeholder="Progress %"
+                        />
                         <Textarea name="note" placeholder="Note for this week (optional)" rows={2} />
+                        {progressDraft >= 100 && (
+                          <Input
+                            name="completionDate"
+                            type="date"
+                            required
+                            defaultValue={new Date().toISOString().slice(0, 10)}
+                            aria-label="Date of completion"
+                          />
+                        )}
                         <div className="flex gap-2">
                           <Button type="submit" size="sm" disabled={saving}>
                             {saving ? "Saving..." : "Save update"}
@@ -126,7 +164,15 @@ const GoalsManager = ({ initialGoals, isUnassigned }: GoalsManagerProps) => {
                       </form>
                     ) : (
                       <div className="flex gap-2 border-t pt-3">
-                        <Button type="button" variant="outline" size="sm" onClick={() => setUpdatingId(goal.id)}>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setUpdatingId(goal.id);
+                            setProgressDraft(goal.progressPct);
+                          }}
+                        >
                           Post weekly update
                         </Button>
                         <Button type="button" variant="outline" size="sm" asChild>

@@ -23,17 +23,25 @@ export interface TeamGoal {
   description: string | null;
   progressPct: number;
   status: "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED";
-  dueDate: string | null;
+  lastCompletionDate: string | null;
+  completionDate: string | null;
   createdAt: string;
   owner: { id: string; username: string };
   tests: { score: number | null; questionCount: number; completedAt: string | null }[];
   updates: { createdAt: string }[];
 }
 
+export interface GoalCatalogEntry {
+  id: string;
+  title: string;
+  type: "DEPARTMENTAL" | "BENCH";
+}
+
 interface TeamGoalsManagerProps {
   reports: Report[];
   initialGoals: TeamGoal[];
   assignments: TeamAssignment[];
+  initialCatalog: GoalCatalogEntry[];
   teamName: string;
 }
 
@@ -66,11 +74,74 @@ function blockersSummary(active: TeamAssignment[]): string {
   return values.length ? values.join("; ") : "N/A";
 }
 
-const TeamGoalsManager = ({ reports, initialGoals, assignments, teamName }: TeamGoalsManagerProps) => {
+function projectRowsFor(active: TeamAssignment[]) {
+  return active.map((a) => ({
+    project: active.length > 1 ? `${a.project.name} (${Math.round((a.hoursPerDay / 8) * 100)}%)` : a.project.name,
+    pmCsm: a.project.pmCsm ?? "N/A",
+    blocker: a.blocker ?? "N/A",
+  }));
+}
+
+const TeamGoalsManager = ({ reports, initialGoals, assignments, initialCatalog, teamName }: TeamGoalsManagerProps) => {
   const [goals, setGoals] = useState(initialGoals);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const [notice, setNotice] = useState<string | undefined>();
+
+  const [catalog, setCatalog] = useState(initialCatalog);
+  const [typeValue, setTypeValue] = useState<GoalCatalogEntry["type"]>("DEPARTMENTAL");
+  const [titleValue, setTitleValue] = useState(() => initialCatalog.find((c) => c.type === "DEPARTMENTAL")?.title ?? "");
+  const [addingGoal, setAddingGoal] = useState(false);
+  const [newGoalTitle, setNewGoalTitle] = useState("");
+  const [catalogSaving, setCatalogSaving] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | undefined>();
+
+  const titleOptions = catalog.filter((entry) => entry.type === typeValue);
+
+  function changeType(next: GoalCatalogEntry["type"]) {
+    setTypeValue(next);
+    setTitleValue(catalog.find((entry) => entry.type === next)?.title ?? "");
+    setAddingGoal(false);
+    setNewGoalTitle("");
+    setCatalogError(undefined);
+  }
+
+  function closeAssignDialog(next: boolean) {
+    setOpen(next);
+    if (!next) {
+      setAddingGoal(false);
+      setNewGoalTitle("");
+      setCatalogError(undefined);
+      setError(undefined);
+    }
+  }
+
+  async function commitNewGoal() {
+    const title = newGoalTitle.trim();
+    if (!title) return;
+    setCatalogSaving(true);
+    setCatalogError(undefined);
+    const res = await fetch("/api/team/goals/catalog", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, type: typeValue }),
+    });
+    const data = await res.json();
+    setCatalogSaving(false);
+    if (!res.ok) {
+      setCatalogError(data.message ?? "Something went wrong.");
+      return;
+    }
+    setCatalog((prev) =>
+      prev.some((entry) => entry.id === data.catalogEntry.id)
+        ? prev
+        : [...prev, data.catalogEntry].sort((a, b) => a.title.localeCompare(b.title))
+    );
+    setTitleValue(data.catalogEntry.title);
+    setNewGoalTitle("");
+    setAddingGoal(false);
+  }
 
   async function assignGoal(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -82,10 +153,10 @@ const TeamGoalsManager = ({ reports, initialGoals, assignments, teamName }: Team
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         userId: formData.get("userId"),
-        type: formData.get("type"),
-        title: formData.get("title"),
+        type: typeValue,
+        title: titleValue,
         description: formData.get("description"),
-        dueDate: formData.get("dueDate"),
+        lastCompletionDate: typeValue === "BENCH" ? formData.get("lastCompletionDate") : undefined,
       }),
     });
     const data = await res.json();
@@ -94,7 +165,8 @@ const TeamGoalsManager = ({ reports, initialGoals, assignments, teamName }: Team
       setError(data.message ?? "Something went wrong.");
       return;
     }
-    setGoals((prev) => [data.goal, ...prev]);
+    setGoals((prev) => [...(data.goals ?? [data.goal]), ...prev]);
+    setNotice(data.skipped ? `Skipped ${data.skipped} team member(s) who already have this goal.` : undefined);
     setOpen(false);
   }
 
@@ -113,14 +185,11 @@ const TeamGoalsManager = ({ reports, initialGoals, assignments, teamName }: Team
       const active = activeAssignmentsFor(assignments, owner.id);
       return {
         name: owner.username,
-        project: projectSummary(active),
-        pmCsm: pmCsmSummary(active),
-        blockers: blockersSummary(active),
+        projects: projectRowsFor(active),
         goals: memberGoals.map((goal) => ({
           title: goal.title,
           progressPct: goal.progressPct,
-          completionDate: formatDate(goal.dueDate) || null,
-          lastUpdated: formatDateTime(goal.updates[0]?.createdAt ?? goal.createdAt),
+          completionDate: formatDate(goal.completionDate) || null,
         })),
       };
     });
@@ -135,7 +204,7 @@ const TeamGoalsManager = ({ reports, initialGoals, assignments, teamName }: Team
           <Button size="sm" variant="outline" onClick={handleExport} disabled={grouped.length === 0}>
             Export to Excel
           </Button>
-          <Dialog open={open} onOpenChange={setOpen}>
+          <Dialog open={open} onOpenChange={closeAssignDialog}>
             <DialogTrigger asChild>
               <Button size="sm" disabled={reports.length === 0}>
                 New goal
@@ -146,19 +215,7 @@ const TeamGoalsManager = ({ reports, initialGoals, assignments, teamName }: Team
                 <DialogTitle>Assign a goal</DialogTitle>
               </DialogHeader>
               <form onSubmit={assignGoal} className="flex flex-col gap-2">
-                <Select name="userId" required defaultValue={reports[0]?.id}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Team member" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {reports.map((report) => (
-                      <SelectItem key={report.id} value={report.id}>
-                        {report.username}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select name="type" defaultValue="DEPARTMENTAL">
+                <Select value={typeValue} onValueChange={(value) => changeType(value as GoalCatalogEntry["type"])}>
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
@@ -167,11 +224,83 @@ const TeamGoalsManager = ({ reports, initialGoals, assignments, teamName }: Team
                     <SelectItem value="BENCH">Bench</SelectItem>
                   </SelectContent>
                 </Select>
-                <Input name="title" required placeholder="Technical goal (e.g. Advanced Typescript)" />
+
+                {addingGoal ? (
+                  <div className="flex items-center gap-2">
+                    <Input
+                      autoFocus
+                      placeholder="New goal title"
+                      value={newGoalTitle}
+                      onChange={(e) => setNewGoalTitle(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          commitNewGoal();
+                        }
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={commitNewGoal}
+                      disabled={catalogSaving || !newGoalTitle.trim()}
+                    >
+                      {catalogSaving ? "Adding..." : "Add"}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setAddingGoal(false);
+                        setNewGoalTitle("");
+                        setCatalogError(undefined);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
+                  <Select
+                    required
+                    value={titleValue}
+                    onValueChange={(value) => (value === "__ADD_NEW__" ? setAddingGoal(true) : setTitleValue(value))}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Goal title" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__ADD_NEW__">+ Add new goal</SelectItem>
+                      {titleOptions.map((entry) => (
+                        <SelectItem key={entry.id} value={entry.title}>
+                          {entry.title}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                {catalogError && <p className="text-sm text-destructive">{catalogError}</p>}
+
+                <Select name="userId" required defaultValue={reports[0]?.id}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Team member" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">Assign to all</SelectItem>
+                    {reports.map((report) => (
+                      <SelectItem key={report.id} value={report.id}>
+                        {report.username}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
                 <Textarea name="description" placeholder="Details (optional)" rows={2} />
-                <Input name="dueDate" type="date" aria-label="Completion date" />
+                {typeValue === "BENCH" && (
+                  <Input name="lastCompletionDate" type="date" aria-label="Last date of completion" required />
+                )}
                 {error && <p className="text-sm text-destructive">{error}</p>}
-                <Button type="submit" size="sm" disabled={saving} className="self-start">
+                <Button type="submit" size="sm" disabled={saving || addingGoal || !titleValue} className="self-start">
                   {saving ? "Assigning..." : "Assign goal"}
                 </Button>
               </form>
@@ -179,6 +308,8 @@ const TeamGoalsManager = ({ reports, initialGoals, assignments, teamName }: Team
           </Dialog>
         </div>
       </div>
+
+      {notice && <p className="text-sm text-muted-foreground">{notice}</p>}
 
       {grouped.length === 0 ? (
         <p className="text-sm text-muted-foreground">No goals assigned yet.</p>
@@ -193,7 +324,9 @@ const TeamGoalsManager = ({ reports, initialGoals, assignments, teamName }: Team
                 <th className="border p-2 font-medium">Blockers / Issues</th>
                 <th className="border p-2 font-medium">Technical Goal</th>
                 <th className="border p-2 font-medium">Goal Progress</th>
-                <th className="border p-2 font-medium">Completion Date</th>
+                <th className="border p-2 font-medium">Created On</th>
+                <th className="border p-2 font-medium">Last Date of Completion</th>
+                <th className="border p-2 font-medium">Date of Completion</th>
                 <th className="border p-2 font-medium">Last Updated</th>
               </tr>
             </thead>
@@ -241,7 +374,9 @@ const TeamGoalsManager = ({ reports, initialGoals, assignments, teamName }: Team
                       <td className={`border p-2 ${isComplete ? "bg-green-100" : ""}`}>
                         <Pill color={pctTone(goal.progressPct)}>{goal.progressPct}%</Pill>
                       </td>
-                      <td className="border p-2 text-xs text-muted-foreground">{formatDate(goal.dueDate)}</td>
+                      <td className="border p-2 text-xs text-muted-foreground">{formatDate(goal.createdAt)}</td>
+                      <td className="border p-2 text-xs text-muted-foreground">{formatDate(goal.lastCompletionDate)}</td>
+                      <td className="border p-2 text-xs text-muted-foreground">{formatDate(goal.completionDate)}</td>
                       <td className="border p-2 text-xs text-muted-foreground">
                         {formatDateTime(goal.updates[0]?.createdAt ?? goal.createdAt)}
                       </td>

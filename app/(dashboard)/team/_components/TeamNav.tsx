@@ -7,7 +7,6 @@ import { cn } from "@/lib/utils";
 const TEAM_NAV = [
   { href: "/team", label: "Roster" },
   { href: "/team/overview", label: "Overview" },
-  { href: "/team/sessions", label: "Sessions" },
 ];
 
 export function TeamNav() {

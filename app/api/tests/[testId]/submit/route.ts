@@ -37,7 +37,10 @@ export async function POST(request: NextRequest, { params }: RouteContext<"/api/
     prisma.test.update({ where: { id: test.id }, data: { score, completedAt: new Date() } }),
     ...(passed
       ? [
-          prisma.goal.update({ where: { id: test.goalId as string }, data: { progressPct: 100, status: "COMPLETED" } }),
+          prisma.goal.update({
+            where: { id: test.goalId as string },
+            data: { progressPct: 100, status: "COMPLETED", completionDate: new Date() },
+          }),
           prisma.goalUpdate.create({
             data: { goalId: test.goalId as string, progressPct: 100, note: `Completed via test — scored ${score}/${test.questionCount}.` },
           }),

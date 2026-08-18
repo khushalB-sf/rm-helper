@@ -9,7 +9,8 @@ const GOAL_SELECT = {
   description: true,
   progressPct: true,
   status: true,
-  dueDate: true,
+  lastCompletionDate: true,
+  completionDate: true,
   createdAt: true,
   assignedBy: { select: { username: true } },
   tests: {
